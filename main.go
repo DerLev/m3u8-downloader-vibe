@@ -19,6 +19,7 @@ import (
 func main() {
 	urlPtr := flag.String("url", "", "The URL of the Master M3U8 playlist")
 	outPtr := flag.String("out", "output.mp4", "The output filename")
+	langPtr := flag.String("lang", "", "The 3-letter language code for audio (e.g. eng, ger, jpn)")
 	flag.Parse()
 
 	if *urlPtr == "" {
@@ -61,7 +62,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer os.RemoveAll(tempDir) // Clean up temp files at the end
+	defer os.RemoveAll(tempDir)
 
 	// We need the variant URL object to resolve segment paths
 	variantURLObj, _ := url.Parse(fullVariantURL)
@@ -80,11 +81,22 @@ func main() {
 
 	// 5. Convert to MP4
 	fmt.Println("4. Remuxing to MP4 (FFmpeg)...")
-	err = convertToMP4(rawTsFile, *outPtr)
+	err = convertToMP4(rawTsFile, *outPtr, *langPtr)
+
 	if err != nil {
 		fmt.Printf("Error running ffmpeg: %v\n", err)
-		fmt.Println("The raw TS file has been saved as 'combined.ts' in the current directory as a backup.")
-		os.Rename(rawTsFile, "combined.ts")
+
+		// Create a specific backup name based on the intended output
+		// e.g., if out="myvideo.mp4", backup="myvideo.mp4-combined.ts"
+		backupFile := *outPtr + "-combined.ts"
+
+		fmt.Printf("The raw TS file has been saved as '%s' as a backup.\n", backupFile)
+
+		// Move the file from temp dir to current execution dir (or output path)
+		renameErr := os.Rename(rawTsFile, backupFile)
+		if renameErr != nil {
+			fmt.Printf("Warning: Could not save backup file (permission or cross-drive issue): %v\n", renameErr)
+		}
 	} else {
 		fmt.Printf("Done! Saved to %s\n", *outPtr)
 	}
@@ -250,8 +262,26 @@ func mergeSegments(files []string, outFile string) error {
 	return nil
 }
 
-func convertToMP4(tsFile string, mp4File string) error {
-	cmd := exec.Command("ffmpeg", "-y", "-i", tsFile, "-c", "copy", "-bsf:a", "aac_adtstoasc", mp4File)
+func convertToMP4(tsFile string, mp4File string, lang string) error {
+	// Start with the base arguments
+	args := []string{
+		"-y",
+		"-i", tsFile,
+		"-c", "copy",
+		"-bsf:a", "aac_adtstoasc",
+	}
+
+	// NEW: If a language is provided, add the metadata flag
+	// -metadata:s:a:0 means: Set metadata for Stream (s), Audio (a), Index 0 (first track)
+	if lang != "" {
+		args = append(args, "-metadata:s:a:0", fmt.Sprintf("language=%s", lang))
+	}
+
+	// Append the output filename last
+	args = append(args, mp4File)
+
+	cmd := exec.Command("ffmpeg", args...)
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ffmpeg error: %s : %v", string(output), err)
