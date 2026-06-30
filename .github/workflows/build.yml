@@ -1,0 +1,45 @@
+name: Build Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [windows, linux]
+        goarch: [amd64, arm64]
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v7
+
+    - name: Set up Go Environment
+      uses: actions/setup-go@v6
+      with:
+        go-version: 1.25
+
+    - name: Build Binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: |
+        # Set extension to .exe for Windows builds
+        EXT=""
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          EXT=".exe"
+        fi
+        
+        mkdir -p dist
+        go build -v -ldflags="-s -w" --trimpath -o dist/m3u8-downloader-vibe-${{ matrix.goos }}-${{ matrix.goarch }}${EXT} .
+
+    - name: Upload Binary as Artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: m3u8-downloader-vibe-${{ matrix.goos }}-${{ matrix.goarch }}
+        path: dist/
